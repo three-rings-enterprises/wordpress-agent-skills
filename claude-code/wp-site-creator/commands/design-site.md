@@ -24,6 +24,18 @@ All design outputs: `<site-path>/design/`. Theme files: `<site-path>/wp-content/
 
 Key subdirectories: `design/{import,inspiration/screenshots,styles,pages,drafts,approved,verification}` plus `site-spec.md`, `design-tokens.json`, `design-package.json`, `gallery.json` at the design root. Gallery is served at `http://<site-url>/?design-gallery`.
 
+## Version Control
+
+The orchestrator manages git throughout the workflow. Commits happen at phase boundaries and key milestones — never inside parallel subagents.
+
+**Commit messages** follow the pattern: `design(<phase>): <description>` — e.g., `design(phase-1): lock site specification`.
+
+**Rules:**
+- The orchestrator owns all git operations (except Phase 5, where the single build agent commits its own fidelity fixes)
+- Never commit verification screenshots — they are in `.gitignore`
+- Always `git add` specific files/directories, never `git add .` or `git add -A`
+- If `git init` detects an existing repo, skip initialization and continue with commits
+
 ## Trigger
 
 User runs `/design-site` with a site description, or asks to design/build/make a WordPress site.
@@ -88,7 +100,38 @@ Store `<site-path>` for all subsequent phases. Use `STUDIO_HOME` and `<site-path
    ```
 10. **Get site URL:** `studio site status --path <site-path>` — store the URL as `<site-url>` for gallery access.
 
-11. **Verify WordPress is installed:** Check that WordPress is responding (not showing the install screen):
+11. **Initialize git repository:**
+    ```bash
+    cd <site-path>
+    git init
+    ```
+    Create a `.gitignore`:
+    ```
+    # Verification screenshots (large, regenerable)
+    design/verification/
+
+    # Temp/probe files
+    .warm
+
+    # Node
+    node_modules/
+
+    # OS files
+    .DS_Store
+    Thumbs.db
+
+    # WordPress
+    wp-content/debug.log
+    ```
+    Write the `.gitignore` to `<site-path>/.gitignore`, then:
+    ```bash
+    cd <site-path>
+    git add .gitignore wp-content/mu-plugins/design-gallery.php
+    git commit -m "design(init): initialize project with gallery plugin"
+    ```
+    If `git init` reports the directory is already a git repository, skip initialization and proceed — the existing repo will be used for subsequent commits.
+
+12. **Verify WordPress is installed:** Check that WordPress is responding (not showing the install screen):
     ```bash
     curl -s -o /dev/null -w "%{http_code}" "http://<site-url>/?design-asset=gallery.json"
     ```
@@ -217,6 +260,15 @@ After the user confirms the brief, plan 3 design directions. For each: mood name
 
 Present as a compact numbered list — 3-4 lines per direction. Then say: "Generating these 3 directions now —" and **immediately proceed to Phase 2 without waiting for approval.** Do not ask if the user wants to adjust. Do not pause. The user can interrupt (ESC) if they want changes. Speed matters more than gatekeeping here.
 
+### Git Checkpoint
+
+After the spec is saved, images are catalogued, and directions are planned:
+```bash
+cd <site-path>
+git add design/site-spec.md design/*.png design/*.jpg design/*.svg design/*.webp 2>/dev/null; true
+git commit -m "design(phase-1): lock site specification and design brief"
+```
+
 **Output:** Site spec + 3 direction briefs → flow directly into Phase 2.
 
 ---
@@ -303,6 +355,15 @@ Run WCAG contrast verification. Write to `<site-path>/design/design-tokens.json`
 
 This powers the gallery sidebar's color bar, font names, and density/motion pills. Confirm with summary.
 
+### Git Checkpoint
+
+After tokens are locked and patterns are written:
+```bash
+cd <site-path>
+git add design/styles/ design/design-tokens.json design/design-patterns.html design/gallery.json
+git commit -m "design(phase-2): lock design tokens and style direction"
+```
+
 **Output:** `<site-path>/design/design-tokens.json`, `<site-path>/design/design-patterns.html`
 
 ---
@@ -374,6 +435,15 @@ Then:
 ### Iteration
 
 Spawn a new Task agent for revisions: `v[next]-layout[1|2|3].html`. Update `gallery.json` (always include a descriptive layout-approach `label`). Token changes: update `design-tokens.json`, call out the change.
+
+### Git Checkpoint
+
+After the user selects a layout direction:
+```bash
+cd <site-path>
+git add design/pages/ design/gallery.json
+git commit -m "design(phase-3): select page layout direction"
+```
 
 **Output:** Selected layout direction.
 
@@ -506,6 +576,13 @@ On user approval, complete **every step** in this checklist:
   ```
 - [ ] **2. Add** entries to `artifacts.approved` in `gallery.json` with the final page files (paths in `approved/`, not `drafts/`)
 - [ ] **3. Remove** ALL version entries for the approved slug(s) from `artifacts.drafts` — version history is no longer needed once a page is promoted. If all drafts are approved, `artifacts.drafts` should be an empty array `[]`.
+- [ ] **3b. Git commit per page:** After each page is copied to `approved/` and `gallery.json` is updated, commit that page individually:
+  ```bash
+  cd <site-path>
+  git add design/approved/[slug].html design/gallery.json
+  git commit -m "design(phase-4): approve mockup — [slug]"
+  ```
+  This gives per-page rollback granularity. If approving multiple pages at once, commit each one separately in sequence.
 - [ ] **4. Set** `phase` to `"approved"` in `gallery.json`
 - [ ] **5. Screenshot** each approved file for the verification record:
   ```bash
@@ -580,6 +657,15 @@ After all extraction agents complete, validate:
 - Each JSON file exists in `{{site-path}}/design/content/`
 - Each has a non-empty `sections` array
 - Section count roughly matches the number of major sections in the corresponding HTML
+
+### Git Checkpoint
+
+After content extraction is validated:
+```bash
+cd <site-path>
+git add design/content/
+git commit -m "design(phase-4.5): extract content from approved mockups"
+```
 
 ---
 
@@ -704,6 +790,13 @@ Write(<site-path>/wp-content/themes/<theme-slug>/.warm, "")
 >
 > **Step 6 — Tracking:** Run `bash <CLAUDE_PLUGIN_ROOT>/scripts/track.sh agent-site-builder claude-code-theme-activated &`
 >
+> **Step 7 — Git commit (initial build):** After theme activation and page deployment:
+> ```bash
+> cd <site-path>
+> git add wp-content/themes/<theme-slug>/ design/design-package.json design/gallery.json
+> git commit -m "design(phase-5): build and deploy WordPress theme"
+> ```
+>
 > **Return:** Site URL, theme name, site path, number of pages created. Nothing else.
 
 ### After Agent Completes
@@ -724,7 +817,13 @@ Write(<site-path>/wp-content/themes/<theme-slug>/.warm, "")
    - Layout alignment issues (grid proportions, element positioning)
    - Missing hover states, animations, or embellishments
 
-3. If mismatches found: fix the theme files directly (update `style.css`, templates, patterns as needed), re-run block-fixer, and re-screenshot.
+3. If mismatches found: fix the theme files directly (update `style.css`, templates, patterns as needed), re-run block-fixer, and re-screenshot. **After each fix round, commit the changes:**
+   ```bash
+   cd <site-path>
+   git add wp-content/themes/<theme-slug>/
+   git commit -m "design(phase-5): fix fidelity — <brief description of what changed>"
+   ```
+   These incremental commits make it easy to see exactly what each fidelity fix touched.
 
 4. Perform at least 2 comparison rounds. Stop when no visible differences remain or the user says done.
 
