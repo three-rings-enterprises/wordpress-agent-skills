@@ -60,6 +60,14 @@ try {
   await page.evaluate(() => {
     document.querySelectorAll('.reveal').forEach(el => el.classList.add('visible'));
     document.querySelectorAll('.animate-on-scroll').forEach(el => el.classList.add('is-visible'));
+    // Neutralize sticky/fixed headers so they don't render displaced in fullPage screenshots.
+    // Puppeteer's fullPage mode resizes the layout viewport, which can desync sticky positioning.
+    document.querySelectorAll('header, .site-header, [class*="header"]').forEach(el => {
+      const cs = getComputedStyle(el);
+      if (cs.position === 'sticky' || cs.position === 'fixed') {
+        el.style.position = 'static';
+      }
+    });
   });
 
   // Wait for transitions to complete
